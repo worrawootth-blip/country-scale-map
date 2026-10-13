@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ตัวสร้างแผนที่ประเทศ</title>
+<style>
+  :root{
+    --bg:#eef2f1; --panel:#ffffff; --ink:#1d2b2a; --muted:#5d6f6d;
+    --line:#cbd6d4; --accent:#0f6b63; --accent-ink:#ffffff; --sea:#dcebf2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#101a19; --panel:#182523; --ink:#e6efee; --muted:#9db3b0; --line:#2c403d; --accent:#3fb5a8; --accent-ink:#06201d; }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:"Sarabun","Noto Sans Thai",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px 16px 40px}
+  h1{font-size:1.6rem;margin:0 0 4px}
+  p.sub{margin:0 0 20px;color:var(--muted)}
+  .controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;align-items:end}
+  label{display:block;font-size:.85rem;color:var(--muted);margin-bottom:4px}
+  select{width:100%;padding:10px;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px}
+  .check{display:flex;align-items:center;gap:8px;font-size:.9rem;color:var(--ink);margin:0;padding:10px 0}
+  .actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+  button{font:inherit;padding:10px 18px;border-radius:6px;border:1px solid var(--accent);cursor:pointer;background:var(--accent);color:var(--accent-ink)}
+  button.ghost{background:transparent;color:var(--accent)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+  #status{font-size:.9rem;color:var(--muted);min-height:1.4em;margin:0 0 8px}
+  #stage{background:var(--sea);border:1px solid var(--line);border-radius:10px;overflow:hidden;min-height:260px;display:flex;align-items:center;justify-content:center}
+  #stage svg{display:block;width:100%;height:auto}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;min-height:34px}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:4px 6px 4px 12px;font-size:.9rem}
+  .chip button{padding:0;width:22px;height:22px;line-height:1;border-radius:50%;background:transparent;color:var(--muted);border:none;font-size:1rem}
+  .chip button:hover{background:var(--line)}
+  .dot{width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.35);flex:none}
+  .chip input[type=number]{width:84px;padding:3px 6px;font:inherit;font-size:.85rem;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:4px}
+  input[type=color]{width:100%;height:42px;padding:2px;border:1px solid var(--line);border-radius:6px;background:var(--bg);cursor:pointer}
+  .none{color:var(--muted);font-size:.9rem;padding:5px 0}
+  .empty{color:#4a5f66;padding:40px 16px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ตัวสร้างแผนที่ประเทศ</h1>
+  <p class="sub">เลือกทวีปและประเทศ แล้วกดสร้างแผนที่ ประเทศที่เลือกจะถูกไฮไลต์พร้อมชื่อภาษาอังกฤษ</p>
+
+  <div class="controls">
+    <div><label for="continent">ทวีป</label><select id="continent"></select></div>
+    <div><label for="country">ประเทศ</label><select id="country"></select></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button id="add" type="button">เพิ่มประเทศ</button>
+      <button id="asean" type="button" class="ghost">เลือกทั้งอาเซียน</button>
+    </div>
+    <div><label for="baseColor">สีเข้มสุด (ใช้เมื่อกรอกจำนวน)</label><input type="color" id="baseColor" value="#0b5d9e"></div>
+    <label class="check"><input type="checkbox" id="showVal" checked> แสดงจำนวนบนแผนที่</label>
+    <label class="check"><input type="checkbox" id="showAll"> แสดงชื่อประเทศอื่นในทวีปด้วย</label>
+  </div>
+
+  <div class="chips" id="chips" aria-live="polite"></div>
+
+  <div class="actions">
+    <button id="gen" disabled>สร้างแผนที่</button>
+    <button id="dl" class="ghost" disabled>ดาวน์โหลด PNG</button>
+    <button id="reset" class="ghost">รีเซ็ต</button>
+  </div>
+  <p id="status" role="status">กำลังโหลดข้อมูลแผนที่…</p>
+  <div id="stage"><div class="empty">แผนที่จะแสดงที่นี่</div></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<script>
+// id = ISO 3166-1 numeric (ตรงกับ world-atlas)
+// view: rotate = เส้นแวงกลาง, ext = [lonMin, latMin, lonMax, latMax] (ใช้ค่า lon ก่อนหมุน)
+const CONTINENTS = {
+  asia: { name:"เอเชีย (รวมอาเซียน)", rotate:-90, ext:[25,-12,150,58], countries:[
+    ["Brunei",96],["Cambodia",116],["Indonesia",360],["Laos",418],["Malaysia",458],["Myanmar",104],
+    ["Philippines",608],["Singapore",702],["Thailand",764],["Timor-Leste",626],["Vietnam",704],
+    ["China",156],["Japan",392],["South Korea",410],["North Korea",408],["India",356],["Pakistan",586],
+    ["Bangladesh",50],["Sri Lanka",144],["Nepal",524],["Mongolia",496],["Kazakhstan",398],["Iran",364],
+    ["Iraq",368],["Saudi Arabia",682],["Turkey",792],["Israel",376],["United Arab Emirates",784],["Afghanistan",4]
+  ]},
+  europe: { name:"ยุโรป", rotate:-15, ext:[-25,34,60,72], countries:[
+    ["United Kingdom",826],["France",250],["Germany",276],["Italy",380],["Spain",724],["Portugal",620],
+    ["Netherlands",528],["Belgium",56],["Switzerland",756],["Austria",40],["Sweden",752],["Norway",578],
+    ["Finland",246],["Denmark",208],["Poland",616],["Ukraine",804],["Russia",643],["Greece",300],["Ireland",372]
+  ]},
+  africa: { name:"แอฟริกา", rotate:-20, ext:[-20,-36,52,38], countries:[
+    ["Egypt",818],["South Africa",710],["Nigeria",566],["Kenya",404],["Ethiopia",231],["Morocco",504],
+    ["Algeria",12],["Ghana",288],["Tanzania",834],["DR Congo",180],["Libya",434],["Sudan",729],["Angola",24]
+  ]},
+  namerica: { name:"อเมริกาเหนือ", rotate:100, ext:[-170,5,-50,75], countries:[
+    ["United States",840],["Canada",124],["Mexico",484],["Cuba",192],["Guatemala",320],["Panama",591],
+    ["Costa Rica",188],["Jamaica",388]
+  ]},
+  samerica: { name:"อเมริกาใต้", rotate:60, ext:[-85,-57,-32,14], countries:[
+    ["Brazil",76],["Argentina",32],["Chile",152],["Colombia",170],["Peru",604],["Venezuela",862],
+    ["Ecuador",218],["Bolivia",68],["Uruguay",858],["Paraguay",600]
+  ]},
+  oceania: { name:"โอเชียเนีย", rotate:-160, ext:[110,-50,-160,5], countries:[
+    ["Australia",36],["New Zealand",554],["Papua New Guinea",598],["Fiji",242]
+  ]}
+};
+
+const W = 1000, H = 640;
+const $ = id => document.getElementById(id);
+const contSel = $("continent"), countrySel = $("country"), stage = $("stage"), statusEl = $("status");
+let features = null, hasMap = false, lastView = "map";
+
+// ---------- UI ----------
+Object.entries(CONTINENTS).forEach(([k,v]) => contSel.add(new Option(v.name, k)));
+function fillCountries(){
+  countrySel.innerHTML = "";
+  CONTINENTS[contSel.value].countries.forEach(([n,id]) => countrySel.add(new Option(n, id)));
+}
+const PALETTE = ["#e6194b","#3cb44b","#4363d8","#f58231","#911eb4","#17a2b8","#e6b800","#f032e6","#9a6324","#2e8b57","#d2691e","#6a5acd","#ff7ab0","#808000","#008080","#b22222"];
+const colorOf = i => PALETTE[i % PALETTE.length];
+const selected = new Map();
+let dots = [];
+// สีของแต่ละประเทศ: ถ้ามีการกรอกจำนวน -> ไล่สีตามค่า (มาก=เข้ม, น้อย=จาง), ถ้าไม่มี -> คนละสี
+function getColors(){
+  const map = new Map();
+  const hasVal = v => v.val != null && isFinite(v.val);
+  const nums = [...selected.values()].filter(hasVal).map(v => v.val);
+  if(!nums.length){
+    [...selected.keys()].forEach((id,i) => map.set(id, colorOf(i)));
+    return {gradient:false, map};
+  }
+  const min = Math.min(...nums), max = Math.max(...nums), lo = 0.2;
+  const ramp = d3.interpolateRgb("#ffffff", $("baseColor").value);
+  const tOf = x => max === min ? 1 : lo + (1-lo) * (x-min) / (max-min);
+  selected.forEach((v,id) => map.set(id, hasVal(v) ? ramp(tOf(v.val)) : "#bdbdbd"));
+  return {gradient:true, map, min, max, ramp, lo, missing: [...selected.values()].some(v => !hasVal(v))};
+}
+function refreshDots(){
+  const cm = getColors();
+  dots.forEach(([id,d]) => d.style.background = cm.map.get(id));
+}
+$("baseColor").oninput = refreshDots; // id -> {n: ชื่อประเทศ, c: รหัสทวีป} (คงลำดับที่เลือก)
+const ASEAN = [96,116,360,418,458,104,608,702,764,626,704];
+function renderChips(){
+  const box = $("chips"); box.innerHTML = "";
+  if(!selected.size){ box.innerHTML = '<span class="none">ยังไม่ได้เลือกประเทศ</span>'; return; }
+  dots = [];
+  selected.forEach((v,id) => {
+    const n = v.n;
+    const c = document.createElement("span"); c.className = "chip"; c.textContent = n;
+    const dot = document.createElement("span"); dot.className = "dot"; dots.push([id, dot]);
+    c.prepend(dot);
+    c.title = CONTINENTS[v.c].name;
+    const b = document.createElement("button"); b.type = "button"; b.textContent = "×";
+    b.setAttribute("aria-label", "ลบ " + n);
+    b.onclick = () => { selected.delete(id); renderChips(); };
+    const inp = document.createElement("input");
+    inp.type = "number"; inp.step = "any"; inp.placeholder = "จำนวน";
+    inp.setAttribute("aria-label", "จำนวนของ " + n);
+    if(v.val != null) inp.value = v.val;
+    inp.oninput = () => { v.val = inp.value === "" || isNaN(+inp.value) ? null : +inp.value; refreshDots(); };
+    c.appendChild(inp);
+    c.appendChild(b); box.appendChild(c);
+  });
+  refreshDots();
+}
+contSel.onchange = fillCountries; // คงประเทศที่เลือกไว้เดิมเมื่อเปลี่ยนทวีป
+$("add").onclick = () => {
+  const id = +countrySel.value, old = selected.get(id);
+  selected.set(id, {n: countrySel.options[countrySel.selectedIndex].text, c: contSel.value, val: old ? old.val : null});
+  renderChips();
+};
+$("asean").onclick = () => {
+  contSel.value = "asia"; fillCountries();
+  CONTINENTS.asia.countries.filter(c => ASEAN.includes(c[1])).forEach(([n,id]) => selected.set(id, {n, c:"asia", val: selected.has(id) ? selected.get(id).val : null}));
+  renderChips();
+};
+fillCountries(); renderChips();
+
+// ---------- ข้อมูลแผนที่ ----------
+fetch("https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/countries-50m.json")
+  .then(r => { if(!r.ok) throw 0; return r.json(); })
+  .then(topo => {
+    features = topojson.feature(topo, topo.objects.countries).features;
+    $("gen").disabled = false;
+    statusEl.textContent = "พร้อมใช้งาน";
+  })
+  .catch(() => statusEl.textContent = "โหลดข้อมูลแผนที่ไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วรีเฟรชหน้า");
+
+// ตำแหน่งป้ายชื่อ: ใช้ polygon ที่ใหญ่ที่สุดของประเทศ
+function labelPoint(f, path){
+  let g = f.geometry;
+  if(g.type === "MultiPolygon"){
+    let best = null, area = -1;
+    g.coordinates.forEach(c => {
+      const poly = {type:"Polygon", coordinates:c}, a = d3.geoArea(poly);
+      if(a > area){ area = a; best = poly; }
+    });
+    g = best;
+  }
+  return path.centroid(g);
+}
+
+// ---------- สร้างแผนที่ ----------
+function build(){
+  // เลือกประเทศในทวีปเดียว -> แสดงแผนที่ทวีปนั้น, หลายทวีป -> แสดงแผนที่โลก
+  const conts = new Set([...selected.values()].map(v => v.c));
+  const world = conts.size > 1;
+  lastView = world ? "world" : [...conts][0];
+  const cfg = world
+    ? {name:"โลก", rotate:0, ext:[-179.9,-58,179.9,80], countries:[...selected].map(([id,v]) => [v.n,id])}
+    : CONTINENTS[[...conts][0]];
+  if(!selected.size){ statusEl.textContent = "กรุณากด “เพิ่มประเทศ” อย่างน้อย 1 ประเทศก่อนสร้างแผนที่"; return; }
+  const [x0,y0,x1,y1] = cfg.ext;
+  const box = {type:"MultiPoint", coordinates:[[x0,y0],[x1,y0],[x1,y1],[x0,y1],[(x0+x1)/2,y0],[(x0+x1)/2,y1]]};
+  const proj = d3.geoNaturalEarth1().rotate([cfg.rotate,0]).fitExtent([[10,10],[W-10,H-10]], box);
+  const path = d3.geoPath(proj);
+  const ids = new Set(cfg.countries.map(c => c[1]));
+  const showAll = $("showAll").checked && !world;
+
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = d3.create("svg").attr("xmlns", NS).attr("viewBox", `0 0 ${W} ${H}`)
+    .attr("width", W).attr("height", H).attr("font-family", "Arial, Helvetica, sans-serif");
+  svg.append("rect").attr("width", W).attr("height", H).attr("fill", "#dcebf2");
+
+  const cm = getColors();
+  const showVal = $("showVal").checked;
+  const fmt = x => x.toLocaleString("en-US", {maximumFractionDigits: 2});
+  const targets = [...selected].map(([id,v]) => ({id, n: v.n, v: v.val, col: cm.map.get(id), f: features.find(f => +f.id === id)})).filter(t => t.f);
+  svg.append("g").selectAll("path").data(features.filter(f => !selected.has(+f.id))).join("path")
+    .attr("d", path).attr("fill", "#f1efe6").attr("stroke", "#9aa8a6").attr("stroke-width", 0.6);
+
+  svg.append("g").selectAll("path").data(targets).join("path")
+    .attr("d", t => path(t.f)).attr("fill", t => t.col)
+    .attr("stroke", t => d3.color(t.col).darker(1.3).formatHex()).attr("stroke-width", 1.2);
+
+  // ป้ายชื่อประเทศอื่น (ถ้าเลือก)
+  const lab = svg.append("g").attr("text-anchor", "middle").attr("font-size", 12).attr("fill", "#3b4a48")
+    .attr("stroke", "#fff").attr("stroke-width", 3).attr("paint-order", "stroke");
+  if(showAll){
+    cfg.countries.filter(c => !selected.has(c[1])).forEach(([n,cid]) => {
+      const f = features.find(x => +x.id === cid); if(!f) return;
+      const p = labelPoint(f, path); if(isNaN(p[0])) return;
+      lab.append("text").attr("x", p[0]).attr("y", p[1]).text(n);
+    });
+  }
+
+  // ป้ายชื่อประเทศที่เลือก + วงแหวนสำหรับประเทศเล็ก
+  targets.forEach(t => {
+    const p = labelPoint(t.f, path), small = path.area(t.f) < (world ? 60 : 700);
+    if(small) svg.append("circle").attr("cx", p[0]).attr("cy", p[1]).attr("r", 12)
+      .attr("fill", "none").attr("stroke", t.col).attr("stroke-width", 2.5);
+    svg.append("text").attr("x", p[0]).attr("y", p[1] + (small ? 30 : 5)).attr("text-anchor", "middle")
+      .attr("font-size", world || targets.length > 4 ? 15 : 20).attr("font-weight", "bold").attr("fill", "#111")
+      .attr("stroke", "#fff").attr("stroke-width", 4).attr("paint-order", "stroke")
+      .text(showVal && cm.gradient && t.v != null && isFinite(t.v) ? t.n + " (" + fmt(t.v) + ")" : t.n);
+  });
+  if(cm.gradient){
+    const lg = svg.append("defs").append("linearGradient").attr("id", "lg");
+    for(let i = 0; i <= 10; i++) lg.append("stop").attr("offset", i*10 + "%")
+      .attr("stop-color", cm.max === cm.min ? cm.ramp(1) : cm.ramp(cm.lo + (1-cm.lo) * i/10));
+    const lx = W - 236, ly = H - 44;
+    svg.append("rect").attr("x", lx).attr("y", ly).attr("width", 220).attr("height", 14)
+      .attr("fill", "url(#lg)").attr("stroke", "#777");
+    const lt = (x, a, t) => svg.append("text").attr("x", x).attr("y", ly + 30).attr("font-size", 13)
+      .attr("fill", "#222").attr("text-anchor", a).text(t);
+    lt(lx, "start", fmt(cm.min)); lt(lx + 220, "end", fmt(cm.max));
+    svg.append("text").attr("x", lx).attr("y", ly - 6).attr("font-size", 13).attr("fill", "#222").text("Value");
+    if(cm.missing){
+      svg.append("rect").attr("x", lx).attr("y", ly - 38).attr("width", 14).attr("height", 14).attr("fill", "#bdbdbd").attr("stroke", "#777");
+      svg.append("text").attr("x", lx + 20).attr("y", ly - 26).attr("font-size", 13).attr("fill", "#222").text("No data");
+    }
+  }
+  svg.append("text").attr("x", 16).attr("y", H - 16).attr("font-size", 14).attr("fill", "#3b4a48")
+    .text(cfg.name.replace(/ \(.*\)/, ""));
+
+  stage.innerHTML = "";
+  stage.appendChild(svg.node());
+  hasMap = true;
+  $("dl").disabled = false;
+  statusEl.textContent = "สร้างแผนที่แล้ว (" + targets.length + " ประเทศ" + (cm.gradient ? " · ไล่สีตามจำนวน" : "") + (world ? " · แสดงแผนที่โลกเพราะเลือกหลายทวีป" : "") + ")";
+}
+$("gen").onclick = build;
+
+// ---------- ดาวน์โหลด PNG ----------
+$("dl").onclick = () => {
+  const svg = stage.querySelector("svg"); if(!svg) return;
+  const xml = new XMLSerializer().serializeToString(svg);
+  const url = URL.createObjectURL(new Blob([xml], {type:"image/svg+xml;charset=utf-8"}));
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement("canvas"); c.width = W*2; c.height = H*2;
+    const ctx = c.getContext("2d");
+    ctx.fillStyle = "#dcebf2"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url);
+    const save = href => {
+      const a = document.createElement("a");
+      a.href = href; a.download = "map-" + lastView + "-" + selected.size + "countries.png";
+      document.body.appendChild(a); a.click(); a.remove();
+    };
+    try{
+      c.toBlob(b => {
+        if(!b){ save(c.toDataURL("image/png")); return; }
+        const u = URL.createObjectURL(b); save(u); setTimeout(() => URL.revokeObjectURL(u), 4000);
+      }, "image/png");
+    }catch(e){ statusEl.textContent = "ไม่สามารถสร้างไฟล์ PNG ได้: " + e.message; }
+  };
+  img.onerror = () => { statusEl.textContent = "สร้างไฟล์ PNG ไม่สำเร็จ กรุณากดสร้างแผนที่ใหม่แล้วลองอีกครั้ง"; };
+  img.src = url;
+};
+
+// ---------- รีเซ็ต ----------
+$("reset").onclick = () => {
+  contSel.selectedIndex = 0; fillCountries();
+  selected.clear(); renderChips();
+  $("showAll").checked = false;
+  stage.innerHTML = '<div class="empty">แผนที่จะแสดงที่นี่</div>';
+  $("dl").disabled = true; hasMap = false;
+  statusEl.textContent = features ? "พร้อมใช้งาน" : statusEl.textContent;
+};
+</script>
+</body>
+</html>
